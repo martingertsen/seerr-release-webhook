@@ -155,12 +155,12 @@ Add webhook URL:
 ```text
 http://<hostname>:5001/seerr-available
 ```
-Enable event:
- - Media Available
-Method:
- - POST
-Content-Type:
- - application/json
+- Enable event:
+- - Media Available
+- Method:
+- - POST
+- Content-Type:
+- - application/json
 
 ## Testing
 ### Basic Connectivity Test
