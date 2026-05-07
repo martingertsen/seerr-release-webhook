@@ -10,7 +10,7 @@ This setup provides a lightweight webhook endpoint on the script host server:
 ```text
 http://<hostname>:5001/seerr-available
 ```
-Expected result: `Error code: 501`
+Expected result: `HTTP 501` / Unsupported method (`GET`)
 This shows the service is running, the 501 error is due to the service not accepting GET requests, but it is still an easy test to perform in a browser.
 
 When Seerr marks a request as "available", it sends a webhook request to this endpoint.
@@ -31,6 +31,7 @@ The webhook service then:
 | `/var/log/seerr-webhook` | Log files |
 
 ## Requirements
+ - No external Python packages are required
  - Ubuntu server
  - Accessible media storage (example: NAS mount)
  - Pushover account and application token
@@ -75,6 +76,32 @@ Note: the provided `MEDIA_PATHS` value is just an example.
 Protect the file:
 ```bash
 sudo chmod 600 /etc/seerr-webhook.env
+```
+
+## Update service file
+Adjust the `User=` value in the systemd service file to match the local Linux user running the service.
+If you placed anything differently than expected here, the paths must also be updated.
+```bash
+sudo nano /opt/seerr-webhook/systemd/seerr-webhook.service
+```
+Example:
+```text
+[Unit]
+Description=Seerr request available webhook
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=administrator
+WorkingDirectory=/opt/seerr-webhook
+EnvironmentFile=/etc/seerr-webhook.env
+ExecStart=/usr/bin/python3 /opt/seerr-webhook/webhook.py
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
 ```
 
 ## Install systemd Service
@@ -140,7 +167,8 @@ Content-Type:
 ```bash
 curl http://<hostname>:5001/seerr-available
 ```
-Example POST Test
+
+###Example POST Test
 ```bash
 curl -X POST http://<hostname>:5001/seerr-available \
   -H "Content-Type: application/json" \
@@ -183,7 +211,7 @@ Verify:
 systemctl status seerr-webhook
 ```
 
-# Security Notes
+## Security Notes
 This webhook is intended for internal LAN use.
 
 Recommended:
