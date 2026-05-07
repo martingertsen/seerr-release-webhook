@@ -1,0 +1,16 @@
+[Unit]
+Description=Seerr request available webhook
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=administrator
+WorkingDirectory=/opt/seerr-webhook
+EnvironmentFile=/etc/seerr-webhook.env
+ExecStart=/usr/bin/python3 /opt/seerr-webhook/webhook.py
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
