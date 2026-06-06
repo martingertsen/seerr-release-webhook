@@ -1,7 +1,7 @@
 # Seerr Release Webhook
 
-Webhook service for Seerr/Overseerr/Jellyseerr that runs a local ISO scan when media becomes available and sends a Pushover notification if `.iso` files are found.
-This is to detect bad releases containing such files instead of actual media files, so manual action can be taken to rectify the problem.
+Webhook service for Seerr/Overseerr/Jellyseerr that performs targeted post-processing when media becomes available.
+This helps detect bad releases that contain ISO images instead of actual media files and automatically removes embedded subtitle formats known to cause Plex transcoding issues.
 
 ## Overview
 
@@ -18,9 +18,13 @@ When Seerr marks a request as "available", it sends a webhook request to this en
 The webhook service then:
 - receives the Seerr payload
 - validates the Authorization bearer token
-- runs `scan_isos_and_send_pushover.py`
-- scans configured media paths for `.iso` files
-- sends a Pushover notification if any are found
+- ignores Uptime Kuma health checks
+- resolves the local media path using Radarr or Sonarr
+- runs a targeted ISO scan against only that media path
+- sends a Pushover notification if ISO files are found
+- runs subtitle cleanup against only that media path
+- removes embedded ASS, SSA, PGS and VobSub subtitle tracks
+- automatically deletes temporary backup files after successful processing
 
 ## Components
 | Component	| Purpose |
@@ -28,7 +32,9 @@ The webhook service then:
 | `/opt/seerr-webhook` | Webhook application source code |
 | `/etc/seerr-webhook.env` | Environment variables |
 | `/etc/systemd/system/seerr-webhook.service` | systemd service |
-| `/var/log/seerr-webhook` | Log files |
+| `/opt/seerr-webhook/find_media_path.py`   | Resolves Seerr payload to local media path via Radarr/Sonarr |
+| `/opt/seerr-webhook/plex-subs-cleanup.sh` | Removes problematic embedded subtitle formats from newly available media |
+| `/opt/seerr-webhook/scan_isos_and_send_pushover.py` | Scans media folders for ISO files and sends Pushover notifications |
 
 ## Requirements
  - No external Python packages are required
@@ -38,20 +44,31 @@ The webhook service then:
  - Python 3
  - Seerr
  - Network access between Seerr, the file storage, and the Ubuntu server
+ - Radarr
+ - Sonarr
+ - mkvmerge (MKVToolNix)
+ - ffprobe (ffmpeg)
+ - jq
 
 ## Directory Structure
 ```text
 /opt/seerr-webhook
+├── webhook.py
+├── find_media_path.py
+├── scan_isos_and_send_pushover.py
+├── plex-subs-cleanup.sh
+├── systemd/
+│   └── seerr-webhook.service
+
 /etc/seerr-webhook.env
 /etc/systemd/system/seerr-webhook.service
-/var/log/seerr-webhook
 ```
 
 ## Installation
 ### 1. Clone Repository
 ```bash
 cd /opt
-sudo git clone https://github.com/YOUR_USERNAME/seerr-release-webhook.git /opt/seerr-webhook
+sudo git clone https://github.com/martingertsen/seerr-release-webhook.git /opt/seerr-webhook
 ```
 
 ### 2. Create Environment File
@@ -70,8 +87,15 @@ PUSHOVER_APP_TOKEN='<YOUR_PUSHOVER_APP_TOKEN>'
 PUSHOVER_DEVICE='<YOUR_PUSHOVER_DEVICE_NAME>'
 
 MEDIA_PATHS='/mnt/nas/media/movies:/mnt/nas/media/tv'
+
+RADARR_URL='http://docker.localdomain:7878'
+RADARR_API_KEY='<RADARR_API_KEY>'
+
+SONARR_URL='http://docker.localdomain:8989'
+SONARR_API_KEY='<SONARR_API_KEY>'
 ```
 Note: the provided `MEDIA_PATHS` value is just an example.
+Note: Media Available events normally operate on the specific path resolved through Radarr/Sonarr. MEDIA_PATHS is primarily used for manual scans and fallback behaviour.
 
 Protect the file:
 ```bash
@@ -156,25 +180,65 @@ Add webhook URL:
 http://<hostname>:5001/seerr-available
 ```
 - Enable event:
-- - Media Available
+  - Media Available
 - Method:
-- - POST
+  - POST
 - Content-Type:
-- - application/json
+  - application/json
+- Authorization Header:
+  - Bearer <WEBHOOK_SECRET>
+
+### Example JSON Payload
+```json
+{
+  "notification_type": "{{notification_type}}",
+  "event": "{{event}}",
+  "subject": "{{subject}}",
+  "media_type": "{{media_type}}",
+  "tmdbId": "{{media_tmdbid}}",
+  "tvdbId": "{{media_tvdbid}}"
+}
+```
 
 ## Testing
 ### Basic Connectivity Test
 ```bash
 curl http://<hostname>:5001/seerr-available
 ```
+Expected result:
+Expected result:
 
-###Example POST Test
-```bash
-curl -X POST http://<hostname>:5001/seerr-available \
-  -H "Content-Type: application/json" \
-  -H "Authorization: Bearer <YOUR_WEBHOOK_SECRET_FOR_SEERR>" \
-  -d '{}'
+```text
+HTTP 501 Unsupported method ('GET')
 ```
+
+### Example Media Available Test
+```bash
+set -a
+source /etc/seerr-webhook.env
+set +a
+
+curl -X POST "http://localhost:${WEBHOOK_PORT:-5001}/${WEBHOOK_ENDPOINT:-seerr-available}" \
+  -H "Authorization: Bearer $WEBHOOK_SECRET" \
+  -H "Content-Type: application/json" \
+  --data '{
+    "notification_type": "MEDIA_AVAILABLE",
+    "event": "Movie Request Now Available",
+    "subject": "Example Movie",
+    "media_type": "movie",
+    "tmdbId": "575264",
+    "tvdbId": ""
+  }'
+```
+
+## Uptime Kuma
+Example health check payload:
+```json
+{
+  "source": "uptime-kuma"
+}
+```
+Health checks are ignored and do not trigger ISO scans or subtitle cleanup.
 
 ## Troubleshooting
 ### Service Does Not Start
@@ -192,13 +256,17 @@ sudo ss -tulpn | grep 5001
 ## Backup
 Important files to back up:
 ```text
-/opt/seerr-webhook
+/opt/seerr-webhook/webhook.py
+/opt/seerr-webhook/find_media_path.py
+/opt/seerr-webhook/scan_isos_and_send_pushover.py
+/opt/seerr-webhook/plex-subs-cleanup.sh
 /etc/seerr-webhook.env
 /etc/systemd/system/seerr-webhook.service
 ```
 
 ## Example Restore Procedure
 ```bash
+sudo cp seerr-webhook.env /etc/
 sudo cp seerr-webhook.service /etc/systemd/system/
 
 sudo systemctl daemon-reload
