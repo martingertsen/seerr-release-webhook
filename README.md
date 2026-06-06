@@ -128,6 +128,17 @@ RestartSec=5
 WantedBy=multi-user.target
 ```
 
+## Install Dependencies
+```bash
+sudo apt update
+
+sudo apt install -y \
+  python3 \
+  ffmpeg \
+  jq \
+  mkvtoolnix
+```
+
 ## Install systemd Service
 Copy service file:
 ```bash
@@ -206,8 +217,6 @@ http://<hostname>:5001/seerr-available
 curl http://<hostname>:5001/seerr-available
 ```
 Expected result:
-Expected result:
-
 ```text
 HTTP 501 Unsupported method ('GET')
 ```
