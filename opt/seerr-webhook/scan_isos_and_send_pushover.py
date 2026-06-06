@@ -3,6 +3,7 @@
 import os
 import sys
 import time
+import argparse
 from pathlib import Path
 from urllib import request, parse, error
 
@@ -12,6 +13,11 @@ MEDIA_PATHS = os.environ["MEDIA_PATHS"].split(":")
 USER_KEY = os.environ["PUSHOVER_USER_KEY"]
 APP_TOKEN = os.environ["PUSHOVER_APP_TOKEN"]
 DEVICE = os.environ.get("PUSHOVER_DEVICE")
+
+def parse_args():
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--path", help="Only scan this folder")
+    return parser.parse_args()
 
 def chunk_lines(lines, max_len=400):
     chunks = []
@@ -28,6 +34,7 @@ def chunk_lines(lines, max_len=400):
         chunks.append(current)
 
     return chunks
+
 
 def send_pushover(text, title):
     chunks = chunk_lines(text.splitlines())
@@ -62,11 +69,14 @@ def send_pushover(text, title):
         time.sleep(0.3)
 
     return True
-
+	
 def main():
+    args = parse_args()
     found_dirs = set()
 
-    for base in MEDIA_PATHS:
+    scan_paths = [args.path] if args.path else MEDIA_PATHS
+
+    for base in scan_paths:
         base_path = Path(base)
 
         if not base_path.exists():
@@ -78,7 +88,7 @@ def main():
                 found_dirs.add(Path(root))
 
     if not found_dirs:
-        print("ISO scan completed. No .iso files found.")
+        print(f"ISO scan completed. No .iso files found in: {', '.join(scan_paths)}")
         return 0
 
     lines = []
@@ -101,6 +111,7 @@ def main():
         return 0
 
     return 2
+
 
 if __name__ == "__main__":
     raise SystemExit(main())
